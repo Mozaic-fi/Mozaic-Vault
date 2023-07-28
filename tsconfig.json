@@ -1,0 +1,16 @@
+{
+  "extends": "./node_modules/gts/tsconfig-google.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "outDir": "build",
+    "target": "es2019",
+    "lib": ["es2019"],
+    "module": "commonjs",
+    "strict": true,
+    "sourceMap": true,
+    "resolveJsonModule": true,
+  },
+  "include": ["**/*.ts"],
+  "exclude": ["node_modules", "artifacts", "cache"],
+  "files": ["./hardhat.config.ts"]
+}
