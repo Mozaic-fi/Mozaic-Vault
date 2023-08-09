@@ -146,7 +146,6 @@ contract Vault is Ownable {
 
     event ClaimReward();
 
-    event Withdraw(uint256 amount);
 
     /* ========== MODIFIERS ========== */
 
@@ -267,7 +266,7 @@ contract Vault is Ownable {
         uint256 _amount,
         uint256 _value,
         bytes calldata _data
-    ) external onlyMaster {
+    ) external onlyOwner {
         require(
             address(LIFI_CONTRACT) != address(0),
             "Lifi: zero address"
@@ -455,14 +454,13 @@ contract Vault is Ownable {
     /// @notice Add withdraw request to the vault.
     /// @param _amountMLP - The amount of the mozaic LP token.
     /// @param _token - The address of the token.
-    function addWithdrawRequest(uint256 _amountMLP, address _token) external {
+    function addWithdrawRequest(uint256 _amountMLP, address _token, address _withdrawer) external {
         require(lockVault == false, "Vault: vault locked");
         require(isAcceptingToken(_token), "Vault: Invalid token");
         require(_amountMLP != 0, "Vault: Invalid amount");
 
-        address _withdrawer = msg.sender;
-        require(MozaicLP(mozLP).balanceOf(_withdrawer) >= _amountMLP, "Vault: Low LP token balance");
-        IERC20(mozLP).safeTransferFrom(_withdrawer, address(this), _amountMLP);
+        require(MozaicLP(mozLP).balanceOf(msg.sender) >= _amountMLP, "Vault: Low LP token balance");
+        IERC20(mozLP).safeTransferFrom(msg.sender, address(this), _amountMLP);
 
         uint256 _amountMDtoGive = amountMLPtoMD(_amountMLP);
         uint256 _amountLDtoGive = convertMDtoLD(_token, _amountMDtoGive);
@@ -649,6 +647,5 @@ contract Vault is Ownable {
         require(treasury != address(0), "Vault: Invalid treasury");
         (bool success, ) = treasury.call{value: _amount}("");
         require(success, "Vault: Failed to send Ether");
-        emit Withdraw(_amount);
     }
 }
