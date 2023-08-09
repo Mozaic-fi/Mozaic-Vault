@@ -129,10 +129,15 @@ describe("StargatePlugin test", () => {
         it('can unstake UDSC', async () => {
             // transfer stargate token to lpStaking
             await stgToken.connect(owner).transfer(stgLPStaking.address, 100000);
-            
+            let current = await StargatePlugin.getCurrentTimestamp();
+            console.log("THis", current);
             //// "wait" 1 days...
-            await ethers.provider.send("evm_increaseTime", [60]);
-            await ethers.provider.send("evm_mine", []);
+            await network.provider.send("hardhat_mine", ["0x1"]);
+            // await ethers.provider.send("evm_increaseTime", [10000]);
+            // await ethers.provider.send("evm_mine", []);
+
+            current = await StargatePlugin.getCurrentTimestamp();
+            console.log("THis2", current);
 
             // Unstake  and check if the total staked amount decreased and the balance of the vault increased
             const amount = BigNumber.from("500000000");

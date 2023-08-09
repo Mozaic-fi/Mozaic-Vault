@@ -8,7 +8,6 @@ import "./interfaces/IPlugin.sol";
 
 // libraries
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 
 /// @title  Mozaic Controller
@@ -61,6 +60,12 @@ contract Controller is Ownable {
 
     /// @notice Returns the flag if settle reported. (updateNum -> chainId -> flag)
     mapping(uint256 => mapping(uint16 => bool)) public settleFlag;
+
+    /// @notice Returns the flag if all snapshot reported. (updateNum -> flag)
+    mapping(uint256 => bool) checkedSnapshot;
+
+    /// @notice Returns the flag if all settle reported. (updateNum -> flag)
+    mapping(uint256 => bool) checkedSettle;
 
     /// @notice Current updated state number.
     uint256 public updateNum;
@@ -150,7 +155,7 @@ contract Controller is Ownable {
     /// @param  _chainId - The identifier of the chain being removed.
     function removeChainId(uint16 _chainId) public onlyOwner {
         require(_chainId > 0, "Controller: Invalid chainID");
-        for(uint256 i = 0; i < supportedChainIds.length; ++i) {
+        for(uint256 i = 0; i < supportedChainIds.length; ++i) { 
             if(_chainId == supportedChainIds[i]) {
                 supportedChainIds[i] = supportedChainIds[supportedChainIds.length - 1];
                 supportedChainIds.pop();
@@ -167,11 +172,13 @@ contract Controller is Ownable {
     /// @param  _srcChainId - The source chain identifier of snapshot being updated.
     /// @param  _snapshot - The snapshot from the local chain.
     function updateSnapshot(uint16 _srcChainId, MozBridge.Snapshot memory _snapshot, uint256 _updateNum) external onlyBridge {
+        if(!isAcceptingChainId(_srcChainId)) return;
         _updateSnapshot(_srcChainId, _snapshot, _updateNum);
     }
 
     /// @notice Accept report from the vaults.
     function settleReport(uint16 _srcChainId, uint256 _updateNum) external onlyBridge {
+        if(!isAcceptingChainId(_srcChainId)) return;
         _settleReport(_srcChainId, _updateNum);
     }
 
@@ -182,7 +189,7 @@ contract Controller is Ownable {
         require(protocolStatus == ProtocolStatus.IDLE, "Controller: Protocal must be IDLE");
         require(supportedChainIds.length != 0, "Controller: No supported chain");
         updateNum++;
-        // update protocol status to `SNAPSHOPPING`
+        // update protocol status to `SNAPSHOTTING`
         protocolStatus = ProtocolStatus.SNAPSHOTTING;
         emit ProtolcolStatusUpdated(protocolStatus);
         for(uint16 i = 0; i < supportedChainIds.length; ++i) {
@@ -248,6 +255,28 @@ contract Controller is Ownable {
         }
         emit RequestSettle(_chainId, updateNum);
     }
+
+    ///  @notice Check the protocol status and the change the protocol status if it is necessary.
+    function checkProtocolStatus() external onlyMaster {
+        if(protocolStatus == ProtocolStatus.SNAPSHOTTING) {
+            if(_checkSnapshot()) {
+                _updateStats();
+                checkedSnapshot[_updateNum] = true;
+                // update protocol status to `OPTIMIZING`
+                protocolStatus = ProtocolStatus.OPTIMIZING;
+                emit ProtolcolStatusUpdated(protocolStatus);
+            }
+        }
+
+        if(protocolStatus == ProtocolStatus.SETTLING) {
+            if(_checkSettle()) {
+                checkedSettle[_updateNum] = true;
+                // update protocol status to `IDLE`
+                protocolStatus = ProtocolStatus.IDLE;
+                emit ProtolcolStatusUpdated(protocolStatus);
+            }
+        }
+    }
     
     /* ========== VIEW FUNCTIONS ========== */
 
@@ -296,11 +325,14 @@ contract Controller is Ownable {
     function _updateSnapshot(uint16 _srcChainId, MozBridge.Snapshot memory _snapshot, uint256 _updateNum) internal {
         if(updateNum != _updateNum) return;
         if(snapshotFlag[_updateNum][_srcChainId] == true) return;
+        if(checkedSnapshot[_updateNum] == true) return;
+
         snapshotFlag[_updateNum][_srcChainId] = true;
         snapshotReported[_srcChainId] = _snapshot;
         emit SnapshotReported(_srcChainId, _updateNum);
         // check if all vaults reported their snapshot
         if(_checkSnapshot()) {
+            checkedSnapshot[_updateNum] = true;
             _updateStats();
             // update protocol status to `OPTIMIZING`
             protocolStatus = ProtocolStatus.OPTIMIZING;
@@ -312,10 +344,13 @@ contract Controller is Ownable {
     function _settleReport(uint16 _srcchainId, uint256 _updateNum) internal {
         if(updateNum != _updateNum) return;
         if(settleFlag[updateNum][_srcchainId] == true) return;
+        if(checkedSettle[_updateNum] == true) return;
+        
         settleFlag[updateNum][_srcchainId] = true;
         emit SettleReported(_srcchainId, _updateNum);
         // check if all vaults are settled
         if(_checkSettle()) {
+            checkedSettle[_updateNum] = true;
             // update protocol status to `IDLE`
             protocolStatus = ProtocolStatus.IDLE;
             emit ProtolcolStatusUpdated(protocolStatus);

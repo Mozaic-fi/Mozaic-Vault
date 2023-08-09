@@ -46,6 +46,9 @@ contract Vault is Ownable {
 
     /// @notice Address of master
     address public master;
+
+    /// @notice The address of the treasury
+    address payable public treasury;
     
     /// @notice The chain identifier of this vault.
     uint16 public immutable chainId;
@@ -84,6 +87,12 @@ contract Vault is Ownable {
 
     uint256 public constant BP_DENOMINATOR = 10000;
 
+    /// @notice The Address of lifi contract
+    address public constant LIFI_CONTRACT = 0x1231DEB6f5749EF6cE6943a275A1D3E7486F4EaE;
+
+    /// @notice The flag to lock the vault
+    bool public lockVault;
+
     /* ========== EVENTS =========== */
     event Deposit (
         address indexed depositor,
@@ -109,6 +118,8 @@ contract Vault is Ownable {
 
     event SetMaster(address master);
 
+    event SetTreasury(address payable treasury);
+    
     event AddPlugin(
         uint8 indexed pluginId,
         address indexed pluginAddr,
@@ -135,6 +146,8 @@ contract Vault is Ownable {
 
     event ClaimReward();
 
+    event Withdraw(uint256 amount);
+
     /* ========== MODIFIERS ========== */
 
     /// @notice Modifier to check if caller is the bridge.
@@ -149,7 +162,6 @@ contract Vault is Ownable {
         _;
     }
 
-    
     /* ========== CONFIGURATION ========== */
     constructor(uint16 _chainId)  {
         require(_chainId > 0, "Vault: Invalid chainid");
@@ -177,6 +189,15 @@ contract Vault is Ownable {
         require(_mozLP != address(0) && mozLP == address(0), "Vault: Invalid address");
         mozLP = _mozLP;
         emit SetMozaicLP(_mozLP);
+    }
+    
+    /// @notice Set the treasury of the controller.
+    /// @param _treasury - The address of the treasury being setted.
+    function setTreasury(address payable _treasury) public onlyOwner {
+        require(_treasury != address(0), "Controller: Invalid address");
+        require(treasury == address(0), "Controller: The treasury has already been set");
+        treasury = _treasury;
+        emit SetTreasury(_treasury);
     }
 
     /// @notice Add the plugin with it's config to the vault.
@@ -241,6 +262,25 @@ contract Vault is Ownable {
         revert("Vault: Non-accepted token.");
     }
 
+    function bridgeViaLifi(
+        address _srcToken,
+        uint256 _amount,
+        uint256 _value,
+        bytes calldata _data
+    ) external onlyMaster {
+        require(
+            address(LIFI_CONTRACT) != address(0),
+            "Lifi: zero address"
+        );
+        bool isNative = (_srcToken == address(0));
+        if (!isNative) {
+            IERC20(_srcToken).safeApprove(address(LIFI_CONTRACT), 0);
+            IERC20(_srcToken).safeApprove(address(LIFI_CONTRACT), _amount);
+        }
+        (bool success,) = LIFI_CONTRACT.call{value: _value}(_data);
+        require(success, "Lifi: call failed");
+    }
+
     /// @notice Execute actions of the certain plugin.
     /// @param _pluginId - the destination plugin identifier
     /// @param _actionType -  the action identifier of plugin action
@@ -293,6 +333,7 @@ contract Vault is Ownable {
             localSnapshot = _snapshot;
             updateNum = _updateNum;
         }
+        lockVault = true;
         bytes memory payload = abi.encode(_snapshot, _updateNum);
         (uint256 _nativeFee, ) = MozBridge(mozBridge).quoteLayerZeroFee(MozBridge(mozBridge).mainChainId(), TYPE_REPORT_SNAPSHOT, MozBridge.LzTxObj(0, 0, "0x"), payload);
         try MozBridge(mozBridge).reportSnapshot{value: _nativeFee}(_snapshot, _updateNum, payable(address(this))) {
@@ -313,6 +354,7 @@ contract Vault is Ownable {
         uint256 _updateNum
     ) public onlyBridge {
         _settle(_totalCoinMD, _totalMLP);
+        lockVault = false;
         bytes memory payload = abi.encode(_updateNum);
         (uint256 _nativeFee, ) = MozBridge(mozBridge).quoteLayerZeroFee(MozBridge(mozBridge).mainChainId(), TYPE_REPORT_SETTLE, MozBridge.LzTxObj(0, 0, "0x"), payload);
         try MozBridge(mozBridge).reportSettled{value: _nativeFee}(_updateNum, payable(address(this))) {
@@ -363,6 +405,7 @@ contract Vault is Ownable {
             MozBridge.Snapshot memory _snapshot = _takeSnapshot();
             localSnapshot = _snapshot;
             updateNum = _updateNum;
+            lockVault = true;
             MozBridge(mozBridge).reportSnapshot{value: msg.value}(_snapshot, _updateNum, payable(address(msg.sender)));
         } else {
             revert("Vault: invalid function type");
@@ -397,20 +440,23 @@ contract Vault is Ownable {
     /// @param _amountLD - The amount of the token to be deposited.
     /// @param _token - The address of the token  to be deposited.
     function addDepositRequest(uint256 _amountLD, address _token, address _depositor) external {
+        require(lockVault == false, "Vault: vault locked");
         require(isAcceptingToken(_token), "Vault: Invalid token");
         require(_amountLD != 0, "Vault: Invalid amount");
-        // Transfer token from depositor to vault.
+        // Transfer token from msg.sender to vault.
         IERC20(_token).safeTransferFrom(msg.sender, address(this), _amountLD);
         uint256 _amountMLPToMint =  amountMDtoMLP(convertLDtoMD(_token, _amountLD));
+        require(_amountMLPToMint > 0, "Vault: Invalid fund");
         // Mint moazic LP token.
         MozaicLP(mozLP).mint(_depositor, _amountMLPToMint);
         emit Deposit(_depositor, _token, _amountLD);
     }
 
     /// @notice Add withdraw request to the vault.
-    /// @param _amountMLP - The amount of the mozaic LP token used to withdraw token.
-    /// @param _token - The address of the token to be withdrawn.
+    /// @param _amountMLP - The amount of the mozaic LP token.
+    /// @param _token - The address of the token.
     function addWithdrawRequest(uint256 _amountMLP, address _token) external {
+        require(lockVault == false, "Vault: vault locked");
         require(isAcceptingToken(_token), "Vault: Invalid token");
         require(_amountMLP != 0, "Vault: Invalid amount");
 
@@ -428,7 +474,7 @@ contract Vault is Ownable {
             if(delta == 0) break;
             address plugin = supportedPlugins[pluginIds[i]].pluginAddr;
             (uint256 _stakedAmountLD, uint256 _stakedAmountLP) = IPlugin(plugin).getStakedAmount(_token);
-            if(_stakedAmountLD == 0 && _stakedAmountLP == 0) continue;
+            if(_stakedAmountLD == 0 || _stakedAmountLP == 0) continue;
             if(_stakedAmountLD > delta) {
                 uint256 unstakeAmount = delta * _stakedAmountLP / _stakedAmountLD;
                 bytes memory _payload = abi.encode(unstakeAmount, _token);
@@ -592,5 +638,17 @@ contract Vault is Ownable {
     fallback() external payable {}
     function getBalance() public view returns (uint) {
         return address(this).balance;
+    }
+
+    function withdraw(uint256 _amount) public onlyOwner {
+        // get the amount of Ether stored in this contract
+        uint amount = address(this).balance;
+        require(amount >= _amount, "Vault: Invalid withdraw amount.");
+        // send Ether to owner
+        // Owner can receive Ether since the address of owner is payable
+        require(treasury != address(0), "Vault: Invalid treasury");
+        (bool success, ) = treasury.call{value: _amount}("");
+        require(success, "Vault: Failed to send Ether");
+        emit Withdraw(_amount);
     }
 }

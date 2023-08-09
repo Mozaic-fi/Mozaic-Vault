@@ -84,7 +84,7 @@ contract StargatePlugin is IPlugin, Ownable {
 
     /// @notice Set the treasury and insurance.
     /// @param _treasury - the address of the treasury.
-    /// @param _insurance - the address of the treasury.
+    /// @param _insurance - the address of the insurance.
     /// @dev Must only be called by the owner
     function setTreasury(address _treasury, address _insurance) external onlyOwner {
         require(_treasury != address(0x0) && _insurance != address(0x0), "StargatePlugin: Error Invalid addr");
@@ -283,6 +283,7 @@ contract StargatePlugin is IPlugin, Ownable {
 
         // The total stablecoin amount with mozaic deciaml
         uint256 _totalAssetsMD;
+        uint256 _assetsMD;
         for (uint i; i < _tokens.length; ++i) {
             address _token = _tokens[i];
 
@@ -297,11 +298,19 @@ contract StargatePlugin is IPlugin, Ownable {
             // Get assets LD staked in LPStaking
             // Get pool address
             address _pool = _getStargatePoolFromToken(_token);
-            if(_pool == address(0)) continue;
+            if(_pool == address(0)) {
+                _assetsMD = convertLDtoMD(_token, _assetsLD);
+                _totalAssetsMD = _totalAssetsMD + _assetsMD;
+                continue;
+            }
             
             // Find the Liquidity Pool's index in the Farming Pool.
             (bool found, uint256 stkPoolIndex) = _getPoolIndexInFarming(_pool);
-            if(found == false) continue;
+            if(found == false) {
+                _assetsMD = convertLDtoMD(_token, _assetsLD);
+                _totalAssetsMD = _totalAssetsMD + _assetsMD;
+                continue;
+            }
 
             // Collect pending STG rewards: _stgLPStaking = config.stgLPStaking.withdraw(poolIndex, 0)
             address _stgLPStaking = config.stgLPStaking;
@@ -312,7 +321,7 @@ contract StargatePlugin is IPlugin, Ownable {
             
             // Get amount LD for token.
             _assetsLD = _assetsLD + ((_amountLPStaked  == 0) ? 0 : IStargatePool(_pool).amountLPtoLD(_amountLPStaked));
-            uint256 _assetsMD = convertLDtoMD(_token, _assetsLD);
+            _assetsMD = convertLDtoMD(_token, _assetsLD);
             _totalAssetsMD = _totalAssetsMD + _assetsMD;
         }
         bytes memory result = abi.encode(_totalAssetsMD);
@@ -430,7 +439,7 @@ contract StargatePlugin is IPlugin, Ownable {
         address _stargateToken = config.stargateToken;
         uint256 _stgAmount = IERC20(_stargateToken).balanceOf(address(this));
         if(_stgAmount == 0) return;
-        if(localInsurance == address(0) || localTreasury == address(0)) return;
+        if(localInsurance == address(0) || localTreasury == address(0)) return;  
         uint256 _mozaicAmount = _stgAmount.mul(mozaicFeeBP).div(BP_DENOMINATOR);
         _stgAmount = _stgAmount.sub(_mozaicAmount);
         uint256 _treasuryAmount = _mozaicAmount.mul(treasuryFeeBP).div(BP_DENOMINATOR);
