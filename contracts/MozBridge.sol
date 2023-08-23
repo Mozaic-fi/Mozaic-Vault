@@ -216,7 +216,7 @@ contract MozBridge is Ownable, ILayerZeroReceiver, ILayerZeroUserApplicationConf
         
         bytes memory payload = abi.encode(TYPE_REQUEST_SNAPSHOT, _updateNum);
         LzTxObj memory lzTxObj = LzTxObj(0, 0, "0x");
-        _call(_dstChainId, TYPE_REQUEST_SNAPSHOT, payable(_refundAddress), lzTxObj, payload);
+        _call(_dstChainId, TYPE_REQUEST_SNAPSHOT, _refundAddress, lzTxObj, payload);
     }
 
     // Report snapshot details to Controller (Olny called on Localchains)
@@ -228,17 +228,17 @@ contract MozBridge is Ownable, ILayerZeroReceiver, ILayerZeroUserApplicationConf
     ) external payable onlyVault {
         bytes memory payload = abi.encode(TYPE_REPORT_SNAPSHOT, _snapshot, _updateNum);
         LzTxObj memory lzTxObj = LzTxObj(0, 0, "0x");
-        _call(mainChainId, TYPE_REPORT_SNAPSHOT, payable(_refundAddress), lzTxObj, payload);
+        _call(mainChainId, TYPE_REPORT_SNAPSHOT, _refundAddress, lzTxObj, payload);
     }
 
     // Send settle request to local chains (Only called on Mainchain)
-    function requestSettle(uint16 _dstChainId, uint256  totalCoinMD, uint256 totalMLP, uint256 _updateNum, address payable _refundAddress ) external payable onlyController {
+    function requestSettle(uint16 _dstChainId, uint256  _totalCoinMD, uint256 _totalMLP, uint256 _updateNum, address payable _refundAddress ) external payable onlyController {
         require(_dstChainId > 0, "MozBridge: Invalid ChainId");
         require(_refundAddress != address(0x0), "MozBridge: Invalid address");
         
-        bytes memory payload = abi.encode(TYPE_REQUEST_SETTLE, totalCoinMD, totalMLP, _updateNum);
+        bytes memory payload = abi.encode(TYPE_REQUEST_SETTLE, _totalCoinMD, _totalMLP, _updateNum);
         LzTxObj memory lzTxObj = LzTxObj(0, 0, "0x");
-        _call(_dstChainId, TYPE_REQUEST_SETTLE, payable(_refundAddress), lzTxObj, payload);
+        _call(_dstChainId, TYPE_REQUEST_SETTLE, _refundAddress, lzTxObj, payload);
     }
 
     // Send settle report to Controller (Only called on Localchains)
@@ -246,7 +246,7 @@ contract MozBridge is Ownable, ILayerZeroReceiver, ILayerZeroUserApplicationConf
         require(_refundAddress != address(0x0), "MozBridge: Invalid address");
         bytes memory payload = abi.encode(TYPE_REPORT_SETTLE, _updateNum);
         LzTxObj memory lzTxObj = LzTxObj(0, 0, "0x");
-        _call(mainChainId, TYPE_REPORT_SETTLE, payable(_refundAddress), lzTxObj, payload);
+        _call(mainChainId, TYPE_REPORT_SETTLE, _refundAddress, lzTxObj, payload);
     }
 
     // Get and return the snapshot of the local vault
@@ -259,7 +259,7 @@ contract MozBridge is Ownable, ILayerZeroReceiver, ILayerZeroUserApplicationConf
     // Settle the deposit and withdraw requests of the mainchain vault
     // Used to settle requests of main chain
     // Only used in main chain Bridge
-    function setSettle(uint256  totalCoinMD, uint256 totalMLP) external onlyController {
+    function setSettle(uint256 totalCoinMD, uint256 totalMLP) external onlyController {
         vault.settleRequests(totalCoinMD, totalMLP);
     }
     
@@ -345,7 +345,7 @@ contract MozBridge is Ownable, ILayerZeroReceiver, ILayerZeroUserApplicationConf
             _dstChainId,
             bridgeLookup[_dstChainId],
             _payload,
-            payable(_refundAddress),
+            _refundAddress,
             address(this),
             lzTxParamBuilt
         );
